@@ -2,7 +2,7 @@ name: WCAG + SEO + JSON-LD + W3C validate (Docker) & Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +13,7 @@ permissions:
 env:
   # 'true'  -> errors blokkeren de pipeline (strict)
   # 'false' -> errors alleen loggen, pipeline gaat door (soft)
-  STRICT_MODE: 'false'
+  STRICT_MODE: "false"
 
 jobs:
   checks-and-deploy:
@@ -54,8 +54,27 @@ jobs:
       # 4) Serve je site (public/)
       - name: Start local server
         run: |
-          npx serve -s "$SITE_DIR" -l 3000 &
-          npx wait-on http://localhost:3000/index.html
+          # 🔎 Guard: zorg dat public/index.html bestaat vóór we serveren (scheelt vastlopers)
+          if [ ! -f "$SITE_DIR/index.html" ]; then
+            echo "❌ $SITE_DIR/index.html ontbreekt. Zet SITE_DIR goed of voeg index.html toe."
+            exit 1
+          fi
+
+          echo "🚀 Start static server op poort 3000 voor $SITE_DIR ..."
+          npx serve -s "$SITE_DIR" -l 3000 --no-clipboard &
+
+          # ⏳ Wacht op de TCP-poort (niet op HTTP 200), met timeout
+          npx wait-on tcp:3000 --timeout 30000 --interval 250 || {
+            echo "❌ Server op poort 3000 werd niet bereikbaar binnen 30s."
+            # simpele debug-info
+            echo "Netstat:"
+            (command -v ss >/dev/null && ss -ltnp || netstat -ltn) || true
+            echo "Proceslijst serve:"
+            ps aux | grep -i 'serve -s' || true
+            exit 1
+          }
+
+          echo "✅ Server luistert op tcp:3000"
 
       # 5) Eén loop: WCAG 2.1 AA + SEO + JSON-LD (respecteert STRICT_MODE)
       - name: Run combined WCAG 2.1 AA + SEO + JSON-LD checks
