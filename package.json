@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "pa11y": "^9.0.1"
+  }
+}
