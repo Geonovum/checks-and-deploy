@@ -1,0 +1,321 @@
+name: WCAG + SEO + JSON-LD + W3C validate (Docker) & Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+env:
+  # 'true'  -> errors blokkeren de pipeline (strict)
+  # 'false' -> errors alleen loggen, pipeline gaat door (soft)
+  STRICT_MODE: 'false'
+
+jobs:
+  checks-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1) Repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2) Map van je site ('.' / 'public' / 'docs')
+      - name: Define site directory
+        run: echo "SITE_DIR=." >> $GITHUB_ENV
+
+      # 3) Node + deps voor pa11y
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Chrome/Puppeteer deps (Ubuntu 22.04/24.04 compatible)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 \
+            libfontconfig1 libgbm1 libgcc1 libglib2.0-0 libgtk-3-0 \
+            libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 \
+            libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 \
+            libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 \
+            libxss1 libxtst6 ca-certificates fonts-liberation lsb-release \
+            xdg-utils wget curl unzip
+
+      - name: Install pa11y + cheerio locally
+        run: npm install pa11y cheerio
+
+      # 4) Serve je site
+      - name: Start local server
+        run: |
+          npx serve -s "$SITE_DIR" -l 3000 &
+          npx wait-on http://localhost:3000/index.html
+
+      # 5) Eén loop: WCAG 2.1 AA + SEO + JSON-LD (respecteert STRICT_MODE)
+      - name: Run combined WCAG 2.1 AA + SEO + JSON-LD checks
+        run: |
+          node <<'EOF'
+          const pa11y = require('pa11y');
+          const { execSync } = require('child_process');
+          const cheerio = require('cheerio');
+
+          const siteDir = process.env.SITE_DIR || '.';
+          const strict = String(process.env.STRICT_MODE || 'false').toLowerCase() === 'true';
+          const listCmd = `
+            find "${siteDir}" -name "*.html" \
+            -not -path "*/node_modules/*" \
+            -not -path "*/dist/*" \
+            -not -path "*/.next/*" \
+            -not -path "*/.*/*"
+          `;
+          const htmlFiles = execSync(listCmd).toString().trim().split('\n').filter(Boolean);
+
+          const common = {
+            timeout: 30000,
+            chromeLaunchConfig: { args: ['--no-sandbox','--disable-setuid-sandbox'] }
+          };
+          const wcagConfig = { ...common, standard: 'WCAG2AA', includeWarnings: true, includeNotices: true };
+          const icon = (t) => t === 'error' ? '🛑' : t === 'warning' ? '⚠️' : 'ℹ️';
+
+          async function fetchHtml(url) {
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.text();
+          }
+          const isAbsoluteUrl = (u) => /^https?:\/\//i.test(u);
+
+          function jsonLdCheck(html) {
+            const $ = cheerio.load(html);
+            const out = [];
+            const blocks = $('script[type="application/ld+json"]');
+
+            if (blocks.length === 0) {
+              out.push({ type: 'notice', msg: 'Geen JSON-LD blokken gevonden', sel: 'script[type="application/ld+json"]' });
+              return out;
+            }
+
+            blocks.each((_, el) => {
+              const raw = $(el).contents().text().trim();
+              const loc = 'script[type="application/ld+json"]';
+
+              if (!raw) { out.push({ type: 'warning', msg: 'Leeg JSON-LD blok', sel: loc }); return; }
+
+              let data;
+              try { data = JSON.parse(raw); }
+              catch (e) { out.push({ type: 'error', msg: `JSON parse-fout in JSON-LD: ${e.message}`, sel: loc }); return; }
+
+              const items = Array.isArray(data) ? data : [data];
+
+              for (const item of items) {
+                const ctx = item['@context'];
+                const typ = item['@type'];
+
+                if (!ctx) out.push({ type: 'error', msg: '@context ontbreekt', sel: loc });
+                else if (typeof ctx === 'string' && !/schema\.org/i.test(ctx))
+                  out.push({ type: 'warning', msg: `@context is '${ctx}' (verwacht schema.org)`, sel: loc });
+
+                if (!typ) { out.push({ type: 'error', msg: '@type ontbreekt', sel: loc }); continue; }
+
+                const type = Array.isArray(typ) ? typ[0] : typ;
+
+                switch (type) {
+                  case 'WebSite': {
+                    if (!item.name) out.push({ type: 'error', msg: 'WebSite.name ontbreekt', sel: loc });
+                    if (item.url && !isAbsoluteUrl(item.url))
+                      out.push({ type: 'warning', msg: `WebSite.url lijkt niet absoluut: ${item.url}`, sel: loc });
+                    break;
+                  }
+                  case 'Organization': {
+                    if (!item.name) out.push({ type: 'error', msg: 'Organization.name ontbreekt', sel: loc });
+                    if (item.url && !isAbsoluteUrl(item.url))
+                      out.push({ type: 'warning', msg: `Organization.url lijkt niet absoluut: ${item.url}`, sel: loc });
+                    if (!item.logo) out.push({ type: 'warning', msg: 'Organization.logo ontbreekt (aanbevolen)', sel: loc });
+                    break;
+                  }
+                  case 'Article':
+                  case 'NewsArticle':
+                  case 'BlogPosting': {
+                    if (!item.headline) out.push({ type: 'error', msg: `${type}.headline ontbreekt`, sel: loc });
+                    if (!item.datePublished) out.push({ type: 'error', msg: `${type}.datePublished ontbreekt`, sel: loc });
+                    if (!item.author) out.push({ type: 'warning', msg: `${type}.author ontbreekt (aanbevolen)`, sel: loc });
+                    if (item.image && Array.isArray(item.image) && item.image.some(i => !isAbsoluteUrl(i)))
+                      out.push({ type: 'warning', msg: `${type}.image bevat niet-absolute URL(s)`, sel: loc });
+                    break;
+                  }
+                  case 'BreadcrumbList': {
+                    const els = item.itemListElement;
+                    if (!Array.isArray(els) || els.length === 0) {
+                      out.push({ type: 'error', msg: 'BreadcrumbList.itemListElement ontbreekt of is leeg', sel: loc });
+                    } else {
+                      els.forEach((li, idx) => {
+                        if (!li || li['@type'] !== 'ListItem') {
+                          out.push({ type: 'error', msg: `BreadcrumbList item ${idx} is geen ListItem`, sel: loc }); return;
+                        }
+                        if (typeof li.position !== 'number')
+                          out.push({ type: 'warning', msg: `ListItem ${idx}: position ontbreekt of is geen nummer`, sel: loc });
+                        const itm = li.item;
+                        if (!itm) {
+                          out.push({ type: 'error', msg: `ListItem ${idx}: item ontbreekt`, sel: loc });
+                        } else {
+                          const idOrUrl = itm['@id'] || itm.url;
+                          if (!idOrUrl) out.push({ type: 'error', msg: `ListItem ${idx}: item.@id of item.url ontbreekt`, sel: loc });
+                          else if (!isAbsoluteUrl(idOrUrl)) out.push({ type: 'warning', msg: `ListItem ${idx}: item link lijkt niet absoluut: ${idOrUrl}`, sel: loc });
+                          if (!itm.name) out.push({ type: 'warning', msg: `ListItem ${idx}: item.name ontbreekt (aanbevolen)`, sel: loc });
+                        }
+                      });
+                    }
+                    break;
+                  }
+                  default: {
+                    if (item['@id'] && !isAbsoluteUrl(item['@id']))
+                      out.push({ type: 'warning', msg: `${type} @id lijkt niet absoluut: ${item['@id']}`, sel: loc });
+                  }
+                }
+              }
+            });
+
+            return out;
+          }
+
+          (async () => {
+            let failed = false;
+
+            for (const file of htmlFiles) {
+              const rel = file.replace(new RegExp(`^${siteDir}/?`), '');
+              const url = `http://localhost:3000/${rel}`;
+              console.log(`\n==========================\n🔎 Checking: ${url}\n==========================`);
+
+              // WCAG
+              try {
+                const wcag = await pa11y(url, wcagConfig);
+                const e = wcag.issues.filter(i => i.type === 'error');
+                const w = wcag.issues.filter(i => i.type === 'warning');
+                const n = wcag.issues.filter(i => i.type === 'notice');
+                if (wcag.issues.length === 0) console.log('✅ WCAG: geen issues');
+                else {
+                  console.log(`WCAG: ${e.length} errors, ${w.length} warnings, ${n.length} notices`);
+                  wcag.issues.forEach(i => console.log(`${icon(i.type)} [WCAG/${i.type}] ${i.selector} → ${i.message}`));
+                  if (e.length > 0) failed = true;
+                }
+              } catch (err) {
+                console.error(`❌ WCAG check crashte op ${url}:`, err.message || err);
+                failed = true;
+              }
+
+              // SEO + JSON-LD
+              try {
+                const html = await fetchHtml(url);
+                const $ = cheerio.load(html);
+                const issues = [];
+
+                // SEO basis
+                const title = $('head > title').text().trim();
+                if (!title) issues.push({ type: 'error', msg: '<title> ontbreekt of is leeg', sel: 'head > title' });
+
+                const desc = $('head meta[name="description"]').attr('content')?.trim() || '';
+                if (!desc) issues.push({ type: 'error', msg: 'meta description ontbreekt', sel: 'meta[name="description"]' });
+                else if (desc.length < 50 || desc.length > 160) issues.push({ type: 'warning', msg: `meta description lengte ${desc.length} (aanbevolen 50–160)`, sel: 'meta[name="description"]' });
+
+                const lang = $('html').attr('lang')?.trim();
+                if (!lang) issues.push({ type: 'error', msg: '<html lang> ontbreekt', sel: 'html' });
+
+                const viewport = $('head meta[name="viewport"]').attr('content');
+                if (!viewport) issues.push({ type: 'warning', msg: 'meta viewport ontbreekt (aanbevolen voor mobiel)', sel: 'meta[name="viewport"]' });
+
+                const imgsNoAlt = $('img:not([alt]), img[alt=""], img[alt=null]').length;
+                if (imgsNoAlt > 0) issues.push({ type: 'warning', msg: `${imgsNoAlt} <img>-element(en) zonder bruikbare alt`, sel: 'img' });
+
+                const hasCanonical = $('head link[rel="canonical"]').length > 0;
+                if (!hasCanonical) issues.push({ type: 'warning', msg: 'canonical link ontbreekt (aanbevolen)', sel: 'link[rel="canonical"]' });
+
+                // JSON-LD
+                const jsonldIssues = jsonLdCheck(html);
+                issues.push(...jsonldIssues);
+
+                if (issues.length === 0) console.log('✅ SEO/JSON-LD: geen issues');
+                else {
+                  const e = issues.filter(i => i.type === 'error').length;
+                  const w = issues.filter(i => i.type === 'warning').length;
+                  const n = issues.filter(i => i.type === 'notice').length;
+                  console.log(`SEO/JSON-LD: ${e} errors, ${w} warnings, ${n} notices`);
+                  issues.forEach(i => console.log(`${icon(i.type)} [${i.type.toUpperCase()}] ${i.sel} → ${i.msg}`));
+                  if (e > 0) failed = true;
+                }
+              } catch (err) {
+                console.error(`❌ SEO/JSON-LD check crashte op ${url}:`, err.message || err);
+                failed = true;
+              }
+            }
+
+            // STRICT_MODE: falen of doorgaan
+            if (failed) {
+              if (strict) {
+                console.error('\n❌ Errors gevonden. STRICT_MODE=true ⇒ pipeline faalt.');
+                process.exit(1);
+              } else {
+                console.warn('\n⚠️ Errors gevonden, maar STRICT_MODE=false ⇒ doorgaan met deploy.');
+              }
+            } else {
+              console.log('\n✅ Geen errors (warnings/notices kunnen nog bestaan).');
+            }
+          })();
+          EOF
+
+      # 6) W3C HTML-validatie (Nu Html Checker via Docker) — gebruikt expliciete bestandslijst
+      - name: Validate HTML with W3C (Nu Html Checker via Docker)
+        continue-on-error: ${{ env.STRICT_MODE != 'true' }}
+        run: |
+          docker --version
+          # Forceer pull met retries (soms netwerk/registry hiccups)
+          for i in 1 2 3; do
+            docker pull ghcr.io/validator/validator:latest && break || (echo "Retry $i..." && sleep 5)
+          done
+
+          # Bouw expliciete lijst met alleen de gewenste HTML-bestanden
+          set -e
+          mapfile -d '' HTMLS < <(find "$SITE_DIR" -type f -name "*.html" \
+            -not -path "*/node_modules/*" \
+            -not -path "*/dist/*" \
+            -not -path "*/.next/*" \
+            -not -path "*/.*/*" \
+            -print0)
+
+          if [ ${#HTMLS[@]} -eq 0 ]; then
+            echo "ℹ️ Geen HTML-bestanden gevonden om te valideren in $SITE_DIR."
+            exit 0
+          fi
+
+          echo "🔍 Valideer HTML-bestanden (${#HTMLS[@]} gevonden)..."
+
+          # Run v.Nu alleen op deze bestanden
+          RESULT=$(docker run --rm -v "$PWD":/work -w /work ghcr.io/validator/validator:latest \
+            vnu --errors-only --skip-non-html --format json "${HTMLS[@]}")
+
+          echo "$RESULT"
+
+      # 7) Deploy — altijd uitvoeren zodat soft mode doorzet
+      - name: Deploy to GitHub Pages
+        if: ${{ always() }}
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ${{ env.SITE_DIR }}
+
+      # 8) Toon URL
+      - name: Show GitHub Pages URL
+        if: ${{ always() }}
+        run: |
+          REPO_NAME=${GITHUB_REPOSITORY#*/}
+          USER_NAME=${GITHUB_REPOSITORY%/*}
+          if [[ "$REPO_NAME" == "$USER_NAME.github.io" ]]; then
+            URL="https://${USER_NAME}.github.io/"
+          else
+            URL="https://${USER_NAME}.github.io/${REPO_NAME}/"
+          fi
+          echo "✅ GitHub Pages URL: $URL"
