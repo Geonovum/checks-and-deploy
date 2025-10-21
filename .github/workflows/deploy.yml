@@ -28,7 +28,7 @@ jobs:
 
       # 2) Map van je site -> public/
       - name: Define site directory
-        run: echo "SITE_DIR=public" >> $GITHUB_ENV
+        run: echo "SITE_DIR=." >> $GITHUB_ENV
 
       # 3) Node + deps voor pa11y
       - name: Setup Node.js
