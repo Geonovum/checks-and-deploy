@@ -26,9 +26,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 2) Map van je site ('.' / 'public' / 'docs')
+      # 2) Map van je site -> public/
       - name: Define site directory
-        run: echo "SITE_DIR=public" >> $GITHUB_ENV   # of '.' / 'docs'
+        run: echo "SITE_DIR=public" >> $GITHUB_ENV
 
       # 3) Node + deps voor pa11y
       - name: Setup Node.js
@@ -51,7 +51,7 @@ jobs:
       - name: Install pa11y + cheerio locally
         run: npm install pa11y cheerio
 
-      # 4) Serve je site
+      # 4) Serve je site (public/)
       - name: Start local server
         run: |
           npx serve -s "$SITE_DIR" -l 3000 &
@@ -65,7 +65,7 @@ jobs:
           const { execSync } = require('child_process');
           const cheerio = require('cheerio');
 
-          const siteDir = process.env.SITE_DIR || '.';
+          const siteDir = process.env.SITE_DIR || 'public';
           const strict = String(process.env.STRICT_MODE || 'false').toLowerCase() === 'true';
           const listCmd = `
             find "${siteDir}" -name "*.html" \
@@ -293,13 +293,52 @@ jobs:
 
           echo "🔍 Valideer HTML-bestanden (${#HTMLS[@]} gevonden)..."
 
-          # Run v.Nu alleen op deze bestanden
           RESULT=$(docker run --rm -v "$PWD":/work -w /work ghcr.io/validator/validator:latest \
             vnu --errors-only --skip-non-html --format json "${HTMLS[@]}")
 
           echo "$RESULT"
 
-      # 7) Deploy — altijd uitvoeren zodat soft mode doorzet
+          # Robuuste check op lege messages (met spaties/newlines)
+          if echo "$RESULT" | grep -Eq '"messages"[[:space:]]*:[[:space:]]*\[[[:space:]]*\]'; then
+            echo "✅ Geen HTML-validatiefouten gevonden."
+          else
+            # Extra zekerheid: parse JSON en tel messages
+            echo "$RESULT" | node -e '
+              let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+                try {
+                  const r = JSON.parse(s||"{}");
+                  const n = Array.isArray(r.messages) ? r.messages.length : 0;
+                  if (n === 0) { console.log("✅ Geen HTML-validatiefouten gevonden."); process.exit(0); }
+                  else { console.log(`⚠️ HTML-validatiefouten gedetecteerd (${n} meldingen). Zie JSON hierboven.`); process.exit(1); }
+                } catch(e) { console.log("⚠️ Kon JSON-output niet parsen; bekijk RESULT hierboven."); process.exit(1); }
+              });
+            ' || true
+          fi
+
+      # 7) Debug + guards vóór deploy
+      - name: List files to be deployed
+        run: |
+          echo "📁 Inhoud van $SITE_DIR:"
+          ls -lah "$SITE_DIR" || true
+          echo "🔎 Zoek index.html op root van $SITE_DIR:"
+          find "$SITE_DIR" -maxdepth 1 -type f -name "index.html" -print || true
+
+      - name: Ensure index.html exists at SITE_DIR root
+        run: |
+          if [ ! -f "$SITE_DIR/index.html" ]; then
+            echo "❌ Geen $SITE_DIR/index.html gevonden. Pas SITE_DIR aan of zorg dat index.html in de root staat."
+            exit 1
+          fi
+
+      # 8) SPA 404 fallback (optioneel, handig bij client-side routing)
+      - name: SPA 404 fallback
+        run: |
+          if [ -f "$SITE_DIR/index.html" ] && [ ! -f "$SITE_DIR/404.html" ]; then
+            cp "$SITE_DIR/index.html" "$SITE_DIR/404.html"
+            echo "ℹ️ SPA fallback: 404.html aangemaakt."
+          fi
+
+      # 9) Deploy — altijd uitvoeren zodat soft mode doorzet
       - name: Deploy to GitHub Pages
         if: ${{ always() }}
         uses: peaceiris/actions-gh-pages@v4
@@ -307,7 +346,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ${{ env.SITE_DIR }}
 
-      # 8) Toon URL
+      # 10) Toon URL
       - name: Show GitHub Pages URL
         if: ${{ always() }}
         run: |
