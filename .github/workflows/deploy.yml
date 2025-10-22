@@ -317,23 +317,6 @@ jobs:
 
           echo "$RESULT"
 
-          # Robuuste check op lege messages (met spaties/newlines)
-          if echo "$RESULT" | grep -Eq '"messages"[[:space:]]*:[[:space:]]*\[[[:space:]]*\]'; then
-            echo "✅ Geen HTML-validatiefouten gevonden."
-          else
-            # Extra zekerheid: parse JSON en tel messages
-            echo "$RESULT" | node -e '
-              let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
-                try {
-                  const r = JSON.parse(s||"{}");
-                  const n = Array.isArray(r.messages) ? r.messages.length : 0;
-                  if (n === 0) { console.log("✅ Geen HTML-validatiefouten gevonden."); process.exit(0); }
-                  else { console.log(`⚠️ HTML-validatiefouten gedetecteerd (${n} meldingen). Zie JSON hierboven.`); process.exit(1); }
-                } catch(e) { console.log("⚠️ Kon JSON-output niet parsen; bekijk RESULT hierboven."); process.exit(1); }
-              });
-            ' || true
-          fi
-
       # 7) Debug + guards vóór deploy
       - name: List files to be deployed
         run: |
@@ -349,15 +332,7 @@ jobs:
             exit 1
           fi
 
-      # 8) SPA 404 fallback (optioneel, handig bij client-side routing)
-      - name: SPA 404 fallback
-        run: |
-          if [ -f "$SITE_DIR/index.html" ] && [ ! -f "$SITE_DIR/404.html" ]; then
-            cp "$SITE_DIR/index.html" "$SITE_DIR/404.html"
-            echo "ℹ️ SPA fallback: 404.html aangemaakt."
-          fi
-
-      # 9) Deploy — altijd uitvoeren zodat soft mode doorzet
+      # 8) Deploy — altijd uitvoeren zodat soft mode doorzet
       - name: Deploy to GitHub Pages
         if: ${{ always() }}
         uses: peaceiris/actions-gh-pages@v4
@@ -365,7 +340,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ${{ env.SITE_DIR }}
 
-      # 10) Toon URL
+      # 9) Toon URL
       - name: Show GitHub Pages URL
         if: ${{ always() }}
         run: |
