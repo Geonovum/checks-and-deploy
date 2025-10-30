@@ -1,27 +1,45 @@
 var documentConfig =
 {
-  title: "Documentatie",
-  shortName: "DOC",
+  title: "Gebruikershandleiding word2respec",
+  shortName: "respec",
   pubDomain: "geen",
-  specStatus: "wv",
+  specStatus: "basis",
   specType: "bd",
-  license: "cc0",
+  license: "cc-by-nd",
   latestVersion: [
-    "https://docs.geostandaarden.nl/geen/DOC/"
+    "https://docs.geostandaarden.nl/geen/respec/"
   ],
-  publishDate: "2025-10-10",
+  publishDate: "2025-07-16",
+  publishVersion: "1.1.0",
   thisVersion: [
-    "https://geonovum.github.io/geen-DOC/"
+    "https://docs.geostandaarden.nl/geen/basis-bd-respec-20250716/"
   ],
-  github: "https://github.com/geonovum/geen-DOC/",
-  issueBase: "https://github.com/geonovum/geen-DOC/issues/",
-  edDraftURI: "https://geonovum.github.io/geen-DOC/",
-  canonicalURI: "https://docs.geostandaarden.nl/geen/DOC/",
-  authors: [
+  previousPublishDate: "2023-01-14",
+  previousPublishVersion: "1.0.0",
+  prevVersion: [
+    "https://docs.geostandaarden.nl/geen/geen-bd-respec-20230114/"
+  ],
+  previousMaturity: "geen",
+  github: "https://github.com/geonovum/geen-respec/",
+  issueBase: "https://github.com/geonovum/geen-respec/issues/",
+  edDraftURI: "https://geonovum.github.io/geen-respec/",
+  canonicalURI: "https://docs.geostandaarden.nl/geen/respec/",
+  editors: [
     {
       name: "Gerard Wolbers",
       company: "Geonovum",
       companyURL: "https://www.geonovum.nl/"
     }
-  ]
+  ],
+  localBiblio: {
+    "DONL": {
+      title: "data.overheid.nl",
+      href: "https://data.overheid.nl",
+      authors: "",
+      publisher: "Kennis- en exploitatiecentrum voor Officiële Overheidspublicaties",
+      editors: "",
+      date: "",
+      status: ""
+    }
+  }
 }
