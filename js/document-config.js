@@ -1,45 +1,33 @@
 var documentConfig =
 {
-  title: "Gebruikershandleiding word2respec",
-  shortName: "respec",
-  pubDomain: "geen",
+  title: "Waardelijsten",
+  shortName: "DOCW",
+  pubDomain: "wp",
   specStatus: "basis",
   specType: "bd",
   license: "cc-by-nd",
   latestVersion: [
-    "https://docs.geostandaarden.nl/geen/respec/"
+    "https://docs.geostandaarden.nl/wp/DOCW/"
   ],
-  publishDate: "2025-07-16",
-  publishVersion: "1.1.0",
+  publishDate: "2026-01-20",
+  publishVersion: "1.0.0",
   thisVersion: [
-    "https://docs.geostandaarden.nl/geen/basis-bd-respec-20250716/"
+    "https://docs.geostandaarden.nl/wp/basis-bd-DOCW-20260120/"
   ],
-  previousPublishDate: "2023-01-14",
-  previousPublishVersion: "1.0.0",
-  prevVersion: [
-    "https://docs.geostandaarden.nl/geen/geen-bd-respec-20230114/"
-  ],
-  previousMaturity: "geen",
-  github: "https://github.com/geonovum/geen-respec/",
-  issueBase: "https://github.com/geonovum/geen-respec/issues/",
-  edDraftURI: "https://geonovum.github.io/geen-respec/",
-  canonicalURI: "https://docs.geostandaarden.nl/geen/respec/",
-  editors: [
+  edDraftURI: "https://geonovum.github.io/wp-DOCW/",
+  canonicalURI: "https://docs.geostandaarden.nl/wp/DOCW/",
+  authors: [
     {
       name: "Gerard Wolbers",
       company: "Geonovum",
       companyURL: "https://www.geonovum.nl/"
     }
   ],
-  localBiblio: {
-    "DONL": {
-      title: "data.overheid.nl",
-      href: "https://data.overheid.nl",
-      authors: "",
-      publisher: "Kennis- en exploitatiecentrum voor Officiële Overheidspublicaties",
-      editors: "",
-      date: "",
-      status: ""
+  editors: [
+    {
+      name: "Gerard Wolbers",
+      company: "Geonovum",
+      companyURL: "https://www.geonovum.nl/"
     }
-  }
+  ]
 }
