@@ -3,7 +3,7 @@ var documentConfig =
   title: "Waardelijsten",
   shortName: "DOCW",
   pubDomain: "wp",
-  specStatus: "basis",
+  specStatus: "ld",
   specType: "bd",
   license: "cc-by-nd",
   latestVersion: [
